@@ -178,11 +178,15 @@ func (c *SagaCoordinator) Run() {
 
 func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.txn == nil {
+		c.mu.Unlock()
 		return
 	}
+
+	var nextStep int
+	var needCompensate bool
+	var compensateStart int
 
 	switch msg.Type {
 	case "ExecuteResult":
@@ -192,7 +196,7 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 			fmt.Printf("[Coordinator] Step %d (%s) 执行成功\n", msg.StepID, step.Name)
 
 			if msg.StepID < len(c.txn.Steps)-1 {
-				c.executeStep(msg.StepID + 1)
+				nextStep = msg.StepID + 1
 			} else {
 				c.txn.Status = "Completed"
 				fmt.Printf("\n[Coordinator] 事务 %s 完成\n", c.txn.ID)
@@ -200,7 +204,8 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 		} else {
 			step.Status = "Failed"
 			fmt.Printf("[Coordinator] Step %d (%s) 执行失败: %s\n", msg.StepID, step.Name, msg.Error)
-			c.startCompensation(msg.StepID)
+			needCompensate = true
+			compensateStart = msg.StepID
 		}
 
 	case "CompensateResult":
@@ -209,11 +214,23 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 		fmt.Printf("[Coordinator] Step %d (%s) 补偿成功\n", msg.StepID, step.Name)
 
 		if msg.StepID > 0 {
-			c.compensateStep(msg.StepID - 1)
+			nextStep = msg.StepID - 1
+			needCompensate = true
+			compensateStart = -1
 		} else {
 			c.txn.Status = "RolledBack"
 			fmt.Printf("\n[Coordinator] 事务 %s 回滚完成\n", c.txn.ID)
 		}
+	}
+
+	c.mu.Unlock()
+
+	if nextStep >= 0 && !needCompensate {
+		c.executeStep(nextStep)
+	} else if needCompensate && compensateStart >= 0 {
+		c.startCompensation(compensateStart)
+	} else if needCompensate && compensateStart < 0 {
+		c.compensateStep(nextStep)
 	}
 }
 
