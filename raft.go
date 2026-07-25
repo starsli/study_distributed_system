@@ -62,6 +62,8 @@ type Message struct {
 	Command      string     // 客户端命令（仅用于ClientRequest）
 }
 
+var nodeColors = []string{"\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[35m", "\033[36m"}
+
 // Node Raft节点结构体：包含持久化状态、易失性状态和通信通道
 type Node struct {
 	mu             sync.Mutex    // 互斥锁：保护并发访问
@@ -80,6 +82,7 @@ type Node struct {
 	nodes          []*Node       // 集群中所有节点的引用
 	electionTimer  *time.Timer   // 选举超时计时器
 	heartbeatTimer *time.Timer   // 心跳计时器（仅Leader使用）
+	color          string        // 节点颜色
 }
 
 func NewNode(id int, nodes []*Node) *Node {
@@ -96,6 +99,7 @@ func NewNode(id int, nodes []*Node) *Node {
 		msgChan:     make(chan Message, 100),
 		doneChan:    make(chan struct{}),
 		nodes:       nodes,
+		color:       nodeColors[(id-1)%len(nodeColors)],
 	}
 	return node
 }
@@ -114,7 +118,7 @@ func (n *Node) resetElectionTimer() {
 		n.mu.Lock()
 		defer n.mu.Unlock()
 		if n.state == Follower {
-			fmt.Printf("[Node %d] 选举超时, 转为Candidate, Term=%d\n", n.ID, n.currentTerm+1)
+			fmt.Printf("%s[Node %d] 选举超时, 转为Candidate, Term=%d\033[0m\n", n.color, n.ID, n.currentTerm+1)
 			n.startElection()
 		}
 	})
@@ -128,7 +132,7 @@ func (n *Node) startElection() {
 	n.votedFor = n.ID   // 投自己一票
 	n.voteCount = 1     // 初始票数为1
 
-	fmt.Printf("[Node %d] 开始选举, Term=%d, state=%s\n", n.ID, n.currentTerm, n.state)
+	fmt.Printf("%s[Node %d] 开始选举, Term=%d, state=%s\033[0m\n", n.color, n.ID, n.currentTerm, n.state)
 
 	for _, peer := range n.nodes {
 		if peer.ID == n.ID {
@@ -146,7 +150,7 @@ func (n *Node) startElection() {
 			LastLogIndex: lastLogIdx,  // 自己日志的最后索引
 			LastLogTerm:  lastLogTerm, // 自己日志最后条目的任期号
 		}
-		fmt.Printf("[Node %d] 发送RequestVote(Term=%d) 到 Node %d\n", n.ID, n.currentTerm, peer.ID)
+		fmt.Printf("%s[Node %d] 发送RequestVote(Term=%d) 到 Node %d\033[0m\n", n.color, n.ID, n.currentTerm, peer.ID)
 		go func(p *Node, m Message) {
 			time.Sleep(time.Duration(300+rand.Intn(500)) * time.Millisecond)
 			p.msgChan <- m
@@ -158,7 +162,7 @@ func (n *Node) startElection() {
 // nextIndex初始化为Leader日志长度，matchIndex初始化为0
 func (n *Node) becomeLeader() {
 	n.state = Leader
-	fmt.Printf("\n=== [Node %d] 成为Leader, Term=%d ===\n", n.ID, n.currentTerm)
+	fmt.Printf("\n=== \033[32m[Node %d] 成为Leader, Term=%d\033[0m ===\n", n.ID, n.currentTerm)
 
 	// 初始化每个Follower的日志复制状态
 	for _, peer := range n.nodes {
@@ -234,7 +238,7 @@ func (n *Node) handleRequestVote(msg Message) {
 			Term:    n.currentTerm,
 			Success: false,
 		}
-		fmt.Printf("[Node %d] 拒绝投票(Term=%d < %d)\n", n.ID, msg.Term, n.currentTerm)
+		fmt.Printf("%s[Node %d] 拒绝投票(Term=%d < %d)\033[0m\n", n.color, n.ID, msg.Term, n.currentTerm)
 		n.nodes[msg.CandidateID-1].msgChan <- response
 		return
 	}
@@ -264,7 +268,7 @@ func (n *Node) handleRequestVote(msg Message) {
 			Term:    n.currentTerm,
 			Success: true,
 		}
-		fmt.Printf("[Node %d] 投票给 Candidate %d, Term=%d\n", n.ID, msg.CandidateID, n.currentTerm)
+		fmt.Printf("%s[Node %d] 投票给 Candidate %d, Term=%d\033[0m\n", n.color, n.ID, msg.CandidateID, n.currentTerm)
 		n.nodes[msg.CandidateID-1].msgChan <- response
 	} else {
 		response := Message{
@@ -274,7 +278,7 @@ func (n *Node) handleRequestVote(msg Message) {
 			Term:    n.currentTerm,
 			Success: false,
 		}
-		fmt.Printf("[Node %d] 拒绝投票(已投:%d, upToDate:%v)\n", n.ID, n.votedFor, upToDate)
+		fmt.Printf("%s[Node %d] 拒绝投票(已投:%d, upToDate:%v)\033[0m\n", n.color, n.ID, n.votedFor, upToDate)
 		n.nodes[msg.CandidateID-1].msgChan <- response
 	}
 }
@@ -297,7 +301,7 @@ func (n *Node) handleVoteResponse(msg Message) {
 	// 如果是当前任期的Candidate且收到肯定投票
 	if n.state == Candidate && msg.Term == n.currentTerm && msg.Success {
 		n.voteCount++
-		fmt.Printf("[Node %d] 收到投票, voteCount=%d\n", n.ID, n.voteCount)
+		fmt.Printf("%s[Node %d] 收到投票, voteCount=%d\033[0m\n", n.color, n.ID, n.voteCount)
 		// 获得多数派投票（(N+1)/2）则成为Leader
 		if n.voteCount >= (len(n.nodes)+1)/2 {
 			n.becomeLeader()
@@ -369,8 +373,8 @@ func (n *Node) handleAppendEntries(msg Message) {
 		// 将已提交但未应用的日志应用到状态机
 		for n.lastApplied < n.commitIndex {
 			n.lastApplied++
-			fmt.Printf("[Node %d] 应用日志 Entry[%d]='%s', Term=%d\n",
-				n.ID, n.lastApplied, n.log[n.lastApplied].Command, n.log[n.lastApplied].Term)
+			fmt.Printf("%s[Node %d] 应用日志 Entry[%d]='%s', Term=%d\033[0m\n",
+				n.color, n.ID, n.lastApplied, n.log[n.lastApplied].Command, n.log[n.lastApplied].Term)
 		}
 	}
 
@@ -416,7 +420,7 @@ func (n *Node) handleAppendResponse(msg Message) {
 				// 获得多数派确认则提交
 				if count >= (len(n.nodes)+1)/2 {
 					n.commitIndex = i
-					fmt.Printf("[Node %d] Leader提交日志 Index=%d, Value='%s'\n",
+					fmt.Printf("\033[32m[Node %d] Leader提交日志 Index=%d, Value='%s'\033[0m\n",
 						n.ID, i, n.log[i].Command)
 				}
 			}
@@ -437,7 +441,7 @@ func (n *Node) handleClientRequest(msg Message) {
 
 	// 只有Leader可以处理客户端请求
 	if n.state != Leader {
-		fmt.Printf("[Node %d] 非Leader, 拒绝客户端请求\n", n.ID)
+		fmt.Printf("%s[Node %d] 非Leader, 拒绝客户端请求\033[0m\n", n.color, n.ID)
 		return
 	}
 
@@ -448,7 +452,7 @@ func (n *Node) handleClientRequest(msg Message) {
 		Command: msg.Command,   // 客户端命令
 	}
 	n.log = append(n.log, entry)
-	fmt.Printf("[Node %d] Leader接收客户端请求: '%s', Entry[%d]\n", n.ID, msg.Command, entry.Index)
+	fmt.Printf("\033[32m[Node %d] Leader接收客户端请求: '%s', Entry[%d]\033[0m\n", n.ID, msg.Command, entry.Index)
 }
 
 // Run 节点主循环：持续接收并处理消息
@@ -567,8 +571,8 @@ func main() {
 	fmt.Printf("\n========== 最终状态 ==========\n")
 	for _, n := range nodes {
 		n.mu.Lock()
-		fmt.Printf("[Node %d] State=%s, Term=%d, CommitIndex=%d, LogLen=%d\n",
-			n.ID, n.state, n.currentTerm, n.commitIndex, len(n.log)-1)
+		fmt.Printf("%s[Node %d] State=%s, Term=%d, CommitIndex=%d, LogLen=%d\033[0m\n",
+			n.color, n.ID, n.state, n.currentTerm, n.commitIndex, len(n.log)-1)
 		for i := 1; i < len(n.log); i++ {
 			fmt.Printf("  Log[%d] = '%s' (Term=%d)\n", i, n.log[i].Command, n.log[i].Term)
 		}

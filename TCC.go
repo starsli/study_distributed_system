@@ -20,6 +20,8 @@ type TCCTransaction struct {
 	Resources []*TCCResource
 }
 
+var tccServiceColors = []string{"\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[35m", "\033[36m"}
+
 type TCCService struct {
 	mu         sync.Mutex
 	ID         int
@@ -29,6 +31,7 @@ type TCCService struct {
 	doneChan   chan struct{}
 	canConfirm bool
 	txnResults map[string]bool
+	color      string
 }
 
 type TCCOperation struct {
@@ -50,6 +53,7 @@ func NewTCCService(id int, name string) *TCCService {
 		doneChan:   make(chan struct{}),
 		canConfirm: true,
 		txnResults: make(map[string]bool),
+		color:      tccServiceColors[(id-1)%len(tccServiceColors)],
 	}
 }
 
@@ -79,29 +83,29 @@ func (s *TCCService) handleOperation(op TCCOperation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("[%s] 收到操作: %s, TxnID=%s\n", s.Name, op.Type, op.TxnID)
+	fmt.Printf("%s[%s] 收到操作: %s, TxnID=%s\033[0m\n", s.color, s.Name, op.Type, op.TxnID)
 
 	switch op.Type {
 	case "Try":
 		time.Sleep(time.Duration(200+rand.Intn(300)) * time.Millisecond)
 		resource, exists := s.Resources[op.ResourceID]
 		if !exists {
-			fmt.Printf("[%s] Try失败: 资源不存在\n", s.Name)
+			fmt.Printf("%s[%s] Try失败: 资源不存在\033[0m\n", s.color, s.Name)
 			tccCoordinator.msgChan <- TCCOperation{Type: "TryResult", TxnID: op.TxnID, ServiceID: s.ID, Success: false, ErrorMessage: "资源不存在"}
 			return
 		}
 		if !s.canConfirm {
-			fmt.Printf("[%s] Try失败: 服务不可用\n", s.Name)
+			fmt.Printf("%s[%s] Try失败: 服务不可用\033[0m\n", s.color, s.Name)
 			tccCoordinator.msgChan <- TCCOperation{Type: "TryResult", TxnID: op.TxnID, ServiceID: s.ID, Success: false, ErrorMessage: "服务不可用"}
 			return
 		}
 		if resource.Quantity < op.Quantity+resource.Reserved {
-			fmt.Printf("[%s] Try失败: 资源不足 (可用:%d, 预留:%d, 请求:%d)\n", s.Name, resource.Quantity, resource.Reserved, op.Quantity)
+			fmt.Printf("%s[%s] Try失败: 资源不足 (可用:%d, 预留:%d, 请求:%d)\033[0m\n", s.color, s.Name, resource.Quantity, resource.Reserved, op.Quantity)
 			tccCoordinator.msgChan <- TCCOperation{Type: "TryResult", TxnID: op.TxnID, ServiceID: s.ID, Success: false, ErrorMessage: "资源不足"}
 			return
 		}
 		resource.Reserved += op.Quantity
-		fmt.Printf("[%s] Try成功: 预留资源 %s x%d (剩余:%d, 预留:%d)\n", s.Name, resource.Name, op.Quantity, resource.Quantity, resource.Reserved)
+		fmt.Printf("%s[%s] Try成功: 预留资源 %s x%d (剩余:%d, 预留:%d)\033[0m\n", s.color, s.Name, resource.Name, op.Quantity, resource.Quantity, resource.Reserved)
 		s.txnResults[op.TxnID] = true
 		tccCoordinator.msgChan <- TCCOperation{Type: "TryResult", TxnID: op.TxnID, ServiceID: s.ID, Success: true}
 
@@ -111,10 +115,10 @@ func (s *TCCService) handleOperation(op TCCOperation) {
 		if exists && resource.Reserved >= op.Quantity {
 			resource.Quantity -= op.Quantity
 			resource.Reserved -= op.Quantity
-			fmt.Printf("[%s] Confirm成功: 扣减资源 %s x%d (剩余:%d)\n", s.Name, resource.Name, op.Quantity, resource.Quantity)
+			fmt.Printf("%s[%s] Confirm成功: 扣减资源 %s x%d (剩余:%d)\033[0m\n", s.color, s.Name, resource.Name, op.Quantity, resource.Quantity)
 			tccCoordinator.msgChan <- TCCOperation{Type: "ConfirmResult", TxnID: op.TxnID, ServiceID: s.ID, Success: true}
 		} else {
-			fmt.Printf("[%s] Confirm失败\n", s.Name)
+			fmt.Printf("%s[%s] Confirm失败\033[0m\n", s.color, s.Name)
 			tccCoordinator.msgChan <- TCCOperation{Type: "ConfirmResult", TxnID: op.TxnID, ServiceID: s.ID, Success: false}
 		}
 
@@ -123,10 +127,10 @@ func (s *TCCService) handleOperation(op TCCOperation) {
 		resource, exists := s.Resources[op.ResourceID]
 		if exists && resource.Reserved >= op.Quantity {
 			resource.Reserved -= op.Quantity
-			fmt.Printf("[%s] Cancel成功: 释放预留资源 %s x%d (预留:%d)\n", s.Name, resource.Name, op.Quantity, resource.Reserved)
+			fmt.Printf("%s[%s] Cancel成功: 释放预留资源 %s x%d (预留:%d)\033[0m\n", s.color, s.Name, resource.Name, op.Quantity, resource.Reserved)
 			tccCoordinator.msgChan <- TCCOperation{Type: "CancelResult", TxnID: op.TxnID, ServiceID: s.ID, Success: true}
 		} else {
-			fmt.Printf("[%s] Cancel失败\n", s.Name)
+			fmt.Printf("%s[%s] Cancel失败\033[0m\n", s.color, s.Name)
 			tccCoordinator.msgChan <- TCCOperation{Type: "CancelResult", TxnID: op.TxnID, ServiceID: s.ID, Success: false}
 		}
 	}
@@ -178,21 +182,21 @@ func (c *TCCCoordinator) handleOperation(op TCCOperation) {
 		if op.Success {
 			c.trySuccess++
 		}
-		fmt.Printf("[Coordinator] Try结果: Service %d = %v, 成功=%d/%d\n", op.ServiceID, op.Success, c.trySuccess, c.tryCount)
+		fmt.Printf("\033[36m[Coordinator] Try结果: Service %d = %v, 成功=%d/%d\033[0m\n", op.ServiceID, op.Success, c.trySuccess, c.tryCount)
 
 	case "ConfirmResult":
 		c.confirmCount++
 		if op.Success {
 			c.confirmSuccess++
 		}
-		fmt.Printf("[Coordinator] Confirm结果: Service %d = %v, 成功=%d/%d\n", op.ServiceID, op.Success, c.confirmSuccess, c.confirmCount)
+		fmt.Printf("\033[36m[Coordinator] Confirm结果: Service %d = %v, 成功=%d/%d\033[0m\n", op.ServiceID, op.Success, c.confirmSuccess, c.confirmCount)
 
 	case "CancelResult":
 		c.cancelCount++
 		if op.Success {
 			c.cancelSuccess++
 		}
-		fmt.Printf("[Coordinator] Cancel结果: Service %d = %v, 成功=%d/%d\n", op.ServiceID, op.Success, c.cancelSuccess, c.cancelCount)
+		fmt.Printf("\033[36m[Coordinator] Cancel结果: Service %d = %v, 成功=%d/%d\033[0m\n", op.ServiceID, op.Success, c.cancelSuccess, c.cancelCount)
 	}
 
 	allTried := c.tryCount == len(c.services)
@@ -209,10 +213,10 @@ func (c *TCCCoordinator) handleOperation(op TCCOperation) {
 			c.phaseCancel()
 		}
 	} else if c.phase == "Confirm" && allConfirmed {
-		fmt.Printf("\n[Coordinator] 事务 %s 提交成功\n", c.currentTxnID)
+		fmt.Printf("\n\033[36m[Coordinator] 事务 %s 提交成功\033[0m\n", c.currentTxnID)
 		c.phase = "Done"
 	} else if c.phase == "Cancel" && allCancelled {
-		fmt.Printf("\n[Coordinator] 事务 %s 回滚成功\n", c.currentTxnID)
+		fmt.Printf("\n\033[36m[Coordinator] 事务 %s 回滚成功\033[0m\n", c.currentTxnID)
 		c.phase = "Done"
 	}
 }
@@ -226,7 +230,7 @@ func (c *TCCCoordinator) phaseTry(txnID string, resourceID int, quantity int) {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== Try 阶段 ==========")
-	fmt.Printf("[Coordinator] 发起事务 %s，向所有服务发送 Try 请求\n", txnID)
+	fmt.Printf("\033[36m[Coordinator] 发起事务 %s，向所有服务发送 Try 请求\033[0m\n", txnID)
 
 	for _, service := range c.services {
 		go func(s *TCCService) {
@@ -244,7 +248,7 @@ func (c *TCCCoordinator) phaseConfirm() {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== Confirm 阶段 ==========")
-	fmt.Println("[Coordinator] 所有服务Try成功，发送 Confirm 请求")
+	fmt.Println("\033[36m[Coordinator] 所有服务Try成功，发送 Confirm 请求\033[0m")
 
 	for _, service := range c.services {
 		go func(s *TCCService) {
@@ -262,7 +266,7 @@ func (c *TCCCoordinator) phaseCancel() {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== Cancel 阶段 ==========")
-	fmt.Println("[Coordinator] 至少一个服务Try失败，发送 Cancel 请求")
+	fmt.Println("\033[36m[Coordinator] 至少一个服务Try失败，发送 Cancel 请求\033[0m")
 
 	for _, service := range c.services {
 		go func(s *TCCService) {
@@ -313,7 +317,7 @@ func runTCCDemo(canConfirmList []bool, txnID string) {
 	for _, service := range services {
 		service.mu.Lock()
 		for _, resource := range service.Resources {
-			fmt.Printf("[%s] 资源: %s, 数量:%d, 预留:%d\n", service.Name, resource.Name, resource.Quantity, resource.Reserved)
+			fmt.Printf("%s[%s] 资源: %s, 数量:%d, 预留:%d\033[0m\n", service.color, service.Name, resource.Name, resource.Quantity, resource.Reserved)
 		}
 		service.mu.Unlock()
 	}

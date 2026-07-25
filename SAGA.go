@@ -23,6 +23,8 @@ type SagaTransaction struct {
 	Status  string
 }
 
+var sagaServiceColors = []string{"\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[35m", "\033[36m"}
+
 type SagaService struct {
 	mu         sync.Mutex
 	ID         int
@@ -31,6 +33,7 @@ type SagaService struct {
 	msgChan    chan SagaMessage
 	doneChan   chan struct{}
 	canSucceed bool
+	color      string
 }
 
 type SagaMessage struct {
@@ -51,6 +54,7 @@ func NewSagaService(id int, name string) *SagaService {
 		msgChan:    make(chan SagaMessage, 10),
 		doneChan:   make(chan struct{}),
 		canSucceed: true,
+		color:      sagaServiceColors[(id-1)%len(sagaServiceColors)],
 	}
 }
 
@@ -75,13 +79,13 @@ func (s *SagaService) handleMessage(msg SagaMessage) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	fmt.Printf("[%s] 收到消息: %s, TxnID=%s, Step=%d\n", s.Name, msg.Type, msg.TxnID, msg.StepID)
+	fmt.Printf("%s[%s] 收到消息: %s, TxnID=%s, Step=%d\033[0m\n", s.color, s.Name, msg.Type, msg.TxnID, msg.StepID)
 
 	switch msg.Type {
 	case "Execute":
 		time.Sleep(time.Duration(300+rand.Intn(400)) * time.Millisecond)
 		if !s.canSucceed {
-			fmt.Printf("[%s] 执行失败: 模拟业务异常\n", s.Name)
+			fmt.Printf("%s[%s] 执行失败: 模拟业务异常\033[0m\n", s.color, s.Name)
 			sagaCoordinator.msgChan <- SagaMessage{Type: "ExecuteResult", TxnID: msg.TxnID, StepID: msg.StepID, ServiceID: s.ID, Success: false, Error: "业务异常"}
 			return
 		}
@@ -89,15 +93,15 @@ func (s *SagaService) handleMessage(msg SagaMessage) {
 		case "create_order":
 			s.Resources["orders"]++
 			s.Resources["order_ids"] = msg.StepID * 1000
-			fmt.Printf("[%s] 执行成功: 创建订单 #%d\n", s.Name, s.Resources["order_ids"])
+			fmt.Printf("%s[%s] 执行成功: 创建订单 #%d\033[0m\n", s.color, s.Name, s.Resources["order_ids"])
 
 		case "reserve_inventory":
 			if s.Resources["inventory"] >= msg.Data["quantity"].(int) {
 				s.Resources["inventory"] -= msg.Data["quantity"].(int)
 				s.Resources["reserved"] += msg.Data["quantity"].(int)
-				fmt.Printf("[%s] 执行成功: 扣减库存 %d, 剩余:%d\n", s.Name, msg.Data["quantity"].(int), s.Resources["inventory"])
+				fmt.Printf("%s[%s] 执行成功: 扣减库存 %d, 剩余:%d\033[0m\n", s.color, s.Name, msg.Data["quantity"].(int), s.Resources["inventory"])
 			} else {
-				fmt.Printf("[%s] 执行失败: 库存不足\n", s.Name)
+				fmt.Printf("%s[%s] 执行失败: 库存不足\033[0m\n", s.color, s.Name)
 				sagaCoordinator.msgChan <- SagaMessage{Type: "ExecuteResult", TxnID: msg.TxnID, StepID: msg.StepID, ServiceID: s.ID, Success: false, Error: "库存不足"}
 				return
 			}
@@ -106,15 +110,15 @@ func (s *SagaService) handleMessage(msg SagaMessage) {
 			if s.Resources["balance"] >= msg.Data["amount"].(int) {
 				s.Resources["balance"] -= msg.Data["amount"].(int)
 				s.Resources["paid"] += msg.Data["amount"].(int)
-				fmt.Printf("[%s] 执行成功: 扣款 %d, 余额:%d\n", s.Name, msg.Data["amount"].(int), s.Resources["balance"])
+				fmt.Printf("%s[%s] 执行成功: 扣款 %d, 余额:%d\033[0m\n", s.color, s.Name, msg.Data["amount"].(int), s.Resources["balance"])
 			} else {
-				fmt.Printf("[%s] 执行失败: 余额不足\n", s.Name)
+				fmt.Printf("%s[%s] 执行失败: 余额不足\033[0m\n", s.color, s.Name)
 				sagaCoordinator.msgChan <- SagaMessage{Type: "ExecuteResult", TxnID: msg.TxnID, StepID: msg.StepID, ServiceID: s.ID, Success: false, Error: "余额不足"}
 				return
 			}
 
 		case "send_notification":
-			fmt.Printf("[%s] 执行成功: 发送通知\n", s.Name)
+			fmt.Printf("%s[%s] 执行成功: 发送通知\033[0m\n", s.color, s.Name)
 		}
 		sagaCoordinator.msgChan <- SagaMessage{Type: "ExecuteResult", TxnID: msg.TxnID, StepID: msg.StepID, ServiceID: s.ID, Success: true}
 
@@ -123,20 +127,20 @@ func (s *SagaService) handleMessage(msg SagaMessage) {
 		switch msg.Data["compensate"] {
 		case "cancel_order":
 			s.Resources["orders"]--
-			fmt.Printf("[%s] 补偿成功: 取消订单\n", s.Name)
+			fmt.Printf("%s[%s] 补偿成功: 取消订单\033[0m\n", s.color, s.Name)
 
 		case "release_inventory":
 			s.Resources["inventory"] += msg.Data["quantity"].(int)
 			s.Resources["reserved"] -= msg.Data["quantity"].(int)
-			fmt.Printf("[%s] 补偿成功: 释放库存 %d, 剩余:%d\n", s.Name, msg.Data["quantity"].(int), s.Resources["inventory"])
+			fmt.Printf("%s[%s] 补偿成功: 释放库存 %d, 剩余:%d\033[0m\n", s.color, s.Name, msg.Data["quantity"].(int), s.Resources["inventory"])
 
 		case "refund_payment":
 			s.Resources["balance"] += msg.Data["amount"].(int)
 			s.Resources["paid"] -= msg.Data["amount"].(int)
-			fmt.Printf("[%s] 补偿成功: 退款 %d, 余额:%d\n", s.Name, msg.Data["amount"].(int), s.Resources["balance"])
+			fmt.Printf("%s[%s] 补偿成功: 退款 %d, 余额:%d\033[0m\n", s.color, s.Name, msg.Data["amount"].(int), s.Resources["balance"])
 
 		case "cancel_notification":
-			fmt.Printf("[%s] 补偿成功: 取消通知\n", s.Name)
+			fmt.Printf("%s[%s] 补偿成功: 取消通知\033[0m\n", s.color, s.Name)
 		}
 		sagaCoordinator.msgChan <- SagaMessage{Type: "CompensateResult", TxnID: msg.TxnID, StepID: msg.StepID, ServiceID: s.ID, Success: true}
 	}
@@ -193,17 +197,17 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 		step := c.txn.Steps[msg.StepID]
 		if msg.Success {
 			step.Status = "Success"
-			fmt.Printf("[Coordinator] Step %d (%s) 执行成功\n", msg.StepID, step.Name)
+			fmt.Printf("\033[35m[Coordinator] Step %d (%s) 执行成功\033[0m\n", msg.StepID, step.Name)
 
 			if msg.StepID < len(c.txn.Steps)-1 {
 				nextStep = msg.StepID + 1
 			} else {
 				c.txn.Status = "Completed"
-				fmt.Printf("\n[Coordinator] 事务 %s 完成\n", c.txn.ID)
+				fmt.Printf("\n\033[35m[Coordinator] 事务 %s 完成\033[0m\n", c.txn.ID)
 			}
 		} else {
 			step.Status = "Failed"
-			fmt.Printf("[Coordinator] Step %d (%s) 执行失败: %s\n", msg.StepID, step.Name, msg.Error)
+			fmt.Printf("\033[35m[Coordinator] Step %d (%s) 执行失败: %s\033[0m\n", msg.StepID, step.Name, msg.Error)
 			needCompensate = true
 			compensateStart = msg.StepID
 		}
@@ -211,7 +215,7 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 	case "CompensateResult":
 		step := c.txn.Steps[msg.StepID]
 		step.Status = "Compensated"
-		fmt.Printf("[Coordinator] Step %d (%s) 补偿成功\n", msg.StepID, step.Name)
+		fmt.Printf("\033[35m[Coordinator] Step %d (%s) 补偿成功\033[0m\n", msg.StepID, step.Name)
 
 		if msg.StepID > 0 {
 			nextStep = msg.StepID - 1
@@ -219,7 +223,7 @@ func (c *SagaCoordinator) handleMessage(msg SagaMessage) {
 			compensateStart = -1
 		} else {
 			c.txn.Status = "RolledBack"
-			fmt.Printf("\n[Coordinator] 事务 %s 回滚完成\n", c.txn.ID)
+			fmt.Printf("\n\033[35m[Coordinator] 事务 %s 回滚完成\033[0m\n", c.txn.ID)
 		}
 	}
 
@@ -251,7 +255,7 @@ func (c *SagaCoordinator) startTransaction(txnID string) {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== Saga 事务开始 ==========")
-	fmt.Printf("[Coordinator] 发起事务 %s，包含 %d 个步骤\n", txnID, len(c.txn.Steps))
+	fmt.Printf("\033[35m[Coordinator] 发起事务 %s，包含 %d 个步骤\033[0m\n", txnID, len(c.txn.Steps))
 	c.executeStep(0)
 }
 
@@ -278,7 +282,7 @@ func (c *SagaCoordinator) startCompensation(failedStepIndex int) {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== Saga 补偿开始 ==========")
-	fmt.Printf("[Coordinator] 步骤 %d 失败，开始补偿步骤 %d-%d\n", failedStepIndex, failedStepIndex-1, 0)
+	fmt.Printf("\033[35m[Coordinator] 步骤 %d 失败，开始补偿步骤 %d-%d\033[0m\n", failedStepIndex, failedStepIndex-1, 0)
 
 	c.compensateStep(failedStepIndex - 1)
 }
@@ -290,7 +294,7 @@ func (c *SagaCoordinator) compensateStep(stepIndex int) {
 			c.compensateStep(stepIndex - 1)
 		} else {
 			c.txn.Status = "RolledBack"
-			fmt.Printf("\n[Coordinator] 事务 %s 回滚完成\n", c.txn.ID)
+			fmt.Printf("\n\033[35m[Coordinator] 事务 %s 回滚完成\033[0m\n", c.txn.ID)
 		}
 		return
 	}
@@ -354,7 +358,7 @@ func runSagaDemo(failStepIndex int, txnID string) {
 	fmt.Println("\n========== 最终状态 ==========")
 	for _, service := range services {
 		service.mu.Lock()
-		fmt.Printf("[%s]:\n", service.Name)
+		fmt.Printf("%s[%s]:\033[0m\n", service.color, service.Name)
 		for k, v := range service.Resources {
 			fmt.Printf("  %s: %d\n", k, v)
 		}

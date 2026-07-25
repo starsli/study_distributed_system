@@ -65,6 +65,8 @@ type Message struct {
 	TransactionID string
 }
 
+var participantColors = []string{"\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[35m", "\033[36m"}
+
 type Participant struct {
 	mu         sync.Mutex
 	ID         int
@@ -74,6 +76,7 @@ type Participant struct {
 	canCommit  bool
 	txnData    string
 	persistent bool
+	color      string
 }
 
 func NewParticipant(id int, canCommit bool) *Participant {
@@ -84,6 +87,7 @@ func NewParticipant(id int, canCommit bool) *Participant {
 		doneChan:   make(chan struct{}),
 		canCommit:  canCommit,
 		persistent: false,
+		color:      participantColors[(id-1)%len(participantColors)],
 	}
 }
 
@@ -102,7 +106,7 @@ func (p *Participant) handleMessage(msg Message) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	fmt.Printf("[Participant %d] 收到消息: %s, 当前状态: %s\n", p.ID, msg.Type, p.state)
+	fmt.Printf("%s[Participant %d] 收到消息: %s, 当前状态: %s\033[0m\n", p.color, p.ID, msg.Type, p.state)
 
 	switch msg.Type {
 	case Prepare:
@@ -110,11 +114,11 @@ func (p *Participant) handleMessage(msg Message) {
 		if p.canCommit {
 			p.state = Prepared
 			p.persistent = true
-			fmt.Printf("[Participant %d] 状态变更: Idle -> Prepared (持久化成功)\n", p.ID)
+			fmt.Printf("%s[Participant %d] 状态变更: Idle -> Prepared (持久化成功)\033[0m\n", p.color, p.ID)
 			p.sendVote(msg.TransactionID, VoteYes)
 		} else {
 			p.state = Aborted
-			fmt.Printf("[Participant %d] 状态变更: Idle -> Aborted (无法提交)\n", p.ID)
+			fmt.Printf("%s[Participant %d] 状态变更: Idle -> Aborted (无法提交)\033[0m\n", p.color, p.ID)
 			p.sendVote(msg.TransactionID, VoteNo)
 		}
 
@@ -122,19 +126,19 @@ func (p *Participant) handleMessage(msg Message) {
 		if p.state == Prepared {
 			p.state = Committed
 			p.txnData = "已提交的数据"
-			fmt.Printf("[Participant %d] 状态变更: Prepared -> Committed\n", p.ID)
+			fmt.Printf("%s[Participant %d] 状态变更: Prepared -> Committed\033[0m\n", p.color, p.ID)
 		}
 
 	case Abort:
 		if p.state == Prepared {
 			p.state = Aborted
-			fmt.Printf("[Participant %d] 状态变更: Prepared -> Aborted\n", p.ID)
+			fmt.Printf("%s[Participant %d] 状态变更: Prepared -> Aborted\033[0m\n", p.color, p.ID)
 		}
 	}
 }
 
 func (p *Participant) sendVote(txnID string, vote MsgType) {
-	fmt.Printf("[Participant %d] 发送投票: %s\n", p.ID, vote)
+	fmt.Printf("%s[Participant %d] 发送投票: %s\033[0m\n", p.color, p.ID, vote)
 	coordinator.msgChan <- Message{
 		Type:          vote,
 		FromID:        p.ID,
@@ -178,17 +182,17 @@ func (c *Coordinator) Run() {
 func (c *Coordinator) handleMessage(msg Message) {
 	c.mu.Lock()
 
-	fmt.Printf("[Coordinator] 收到消息: %s 来自 Participant %d\n", msg.Type, msg.FromID)
+	fmt.Printf("\033[31m[Coordinator] 收到消息: %s 来自 Participant %d\033[0m\n", msg.Type, msg.FromID)
 
 	switch msg.Type {
 	case VoteYes:
 		c.voteYesCount++
 		c.voteCount++
-		fmt.Printf("[Coordinator] 累计投票: Yes=%d, Total=%d\n", c.voteYesCount, c.voteCount)
+		fmt.Printf("\033[31m[Coordinator] 累计投票: Yes=%d, Total=%d\033[0m\n", c.voteYesCount, c.voteCount)
 
 	case VoteNo:
 		c.voteCount++
-		fmt.Printf("[Coordinator] 累计投票: Yes=%d, Total=%d (收到No)\n", c.voteYesCount, c.voteCount)
+		fmt.Printf("\033[31m[Coordinator] 累计投票: Yes=%d, Total=%d (收到No)\033[0m\n", c.voteYesCount, c.voteCount)
 	}
 
 	allVoted := c.voteCount == len(c.participants)
@@ -217,7 +221,7 @@ func (c *Coordinator) phase1Prepare(txnID string) {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== 第一阶段: Prepare 阶段 ==========")
-	fmt.Printf("[Coordinator] 发起事务 %s，向所有参与者发送 Prepare\n", txnID)
+	fmt.Printf("\033[31m[Coordinator] 发起事务 %s，向所有参与者发送 Prepare\033[0m\n", txnID)
 
 	for _, p := range c.participants {
 		go func(participant *Participant) {
@@ -248,7 +252,7 @@ func (c *Coordinator) phase2Commit() {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== 第二阶段: Commit 阶段 ==========")
-	fmt.Println("[Coordinator] 所有参与者都同意，发送 Commit 命令")
+	fmt.Println("\033[31m[Coordinator] 所有参与者都同意，发送 Commit 命令\033[0m")
 
 	for _, p := range c.participants {
 		go func(participant *Participant) {
@@ -269,7 +273,7 @@ func (c *Coordinator) phase2Abort() {
 	c.mu.Unlock()
 
 	fmt.Println("\n========== 第二阶段: Abort 阶段 ==========")
-	fmt.Println("[Coordinator] 至少一个参与者拒绝，发送 Abort 命令")
+	fmt.Println("\033[31m[Coordinator] 至少一个参与者拒绝，发送 Abort 命令\033[0m")
 
 	for _, p := range c.participants {
 		go func(participant *Participant) {
@@ -321,7 +325,7 @@ func main() {
 	fmt.Println("\n========== 最终状态 ==========")
 	for _, p := range participants {
 		p.mu.Lock()
-		fmt.Printf("[Participant %d] 状态: %s, 数据持久化: %v\n", p.ID, p.state, p.persistent)
+		fmt.Printf("%s[Participant %d] 状态: %s, 数据持久化: %v\033[0m\n", p.color, p.ID, p.state, p.persistent)
 		p.mu.Unlock()
 	}
 
@@ -369,7 +373,7 @@ func main() {
 	fmt.Println("\n========== 最终状态 ==========")
 	for _, p := range participants2 {
 		p.mu.Lock()
-		fmt.Printf("[Participant %d] 状态: %s, 数据持久化: %v\n", p.ID, p.state, p.persistent)
+		fmt.Printf("%s[Participant %d] 状态: %s, 数据持久化: %v\033[0m\n", p.color, p.ID, p.state, p.persistent)
 		p.mu.Unlock()
 	}
 
