@@ -1,3 +1,6 @@
+// TCC 模式
+//
+//	try-confirm-cancel 模式
 package main
 
 import (

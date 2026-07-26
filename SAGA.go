@@ -1,3 +1,5 @@
+// SAGA 模式
+// saga 长篇叙事、一连串连贯事件
 package main
 
 import (
